@@ -1,0 +1,32 @@
+{
+  "name": "pi-vercel-sandbox",
+  "version": "0.1.0",
+  "description": "Pi Coding Agent extension for Vercel Sandbox — persistent cloud sandboxes with automatic state snapshot and resume",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc --noEmit"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "dependencies": {
+    "@vercel/sandbox": "^2.1.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.78.1",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  },
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "vercel",
+    "sandbox",
+    "extension"
+  ],
+  "license": "Apache-2.0"
+}
