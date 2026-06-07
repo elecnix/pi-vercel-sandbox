@@ -22,7 +22,7 @@ import {
 	truncateHead,
 	truncateLine,
 } from "@earendil-works/pi-coding-agent";
-import { toSandboxPath } from "./paths.js";
+import { toSandboxPath, SANDBOX_WORKSPACE } from "./paths.js";
 import path from "node:path";
 
 // ─── Read ───────────────────────────────────────────────────────────
