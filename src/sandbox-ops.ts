@@ -343,7 +343,7 @@ export function createSandboxBashOps(sandbox: Sandbox): BashOperations {
 		exec: async (command, cwd, { onData, signal, timeout, env }) => {
 			if (signal?.aborted) throw new Error("aborted");
 
-			const sandboxCwd = toSandboxPath(cwd);
+			const sandboxCwd = SANDBOX_WORKSPACE;
 			const controller = new AbortController();
 			const onAbort = () => controller.abort();
 			signal?.addEventListener("abort", onAbort, { once: true });
