@@ -42,6 +42,7 @@ import {
 	createSandboxWriteOps,
 	executeSandboxGrep,
 } from "./sandbox-ops.js";
+import { NativeToolDetector, buildInstallCommand } from "./native-tools.js";
 
 export default function (pi: ExtensionAPI) {
 	const localCwd = process.cwd();
@@ -69,6 +70,7 @@ export default function (pi: ExtensionAPI) {
 	let sandboxStarting: Promise<Sandbox> | undefined;
 	let config: SandboxConfig | undefined;
 	let toolsRegistered = false;
+	let toolDetector: NativeToolDetector | undefined;
 
 	/**
 	 * Check if Vercel Sandbox mode is active.
@@ -118,6 +120,8 @@ export default function (pi: ExtensionAPI) {
 
 		let sandboxInstance: Sandbox;
 		try {
+			const installCmd = cfg.installNativeTools ? buildInstallCommand() : undefined;
+
 			sandboxInstance = await SandboxClass.getOrCreate({
 			name: cfg.name,
 			runtime: cfg.runtime,
@@ -125,6 +129,18 @@ export default function (pi: ExtensionAPI) {
 			...(cfg.ports && cfg.ports.length > 0 ? { ports: cfg.ports } : {}),
 			onCreate: async (sbx) => {
 				ctx?.ui.setStatus("vercel-sandbox", ctx.ui.theme.fg("accent", `Vercel Sandbox: ${cfg.name} (creating)`));
+
+				// Install native tools first so they're available during createCommands
+				if (installCmd) {
+					try {
+						await sbx.runCommand({ cmd: "bash", args: ["-lc", installCmd] });
+					} catch (e) {
+						// Installation failure is non-fatal; tools will fall back to JS
+						const msg = e instanceof Error ? e.message : String(e);
+						ctx?.ui.notify(`Vercel Sandbox: native tool install failed (falling back to JS): ${msg}`, "warning");
+					}
+				}
+
 				for (const cmd of cfg.createCommands) {
 					await sbx.runCommand({ cmd: "bash", args: ["-lc", cmd] });
 				}
@@ -146,6 +162,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		sandbox = sandboxInstance;
+		toolDetector = new NativeToolDetector(sandboxInstance);
 
 		// Build status bar
 		let portInfo = "";
@@ -177,6 +194,7 @@ export default function (pi: ExtensionAPI) {
 		const activeSandbox = sandbox;
 		sandbox = undefined;
 		sandboxStarting = undefined;
+		toolDetector = undefined;
 
 		if (!activeSandbox) return;
 
@@ -283,7 +301,7 @@ export default function (pi: ExtensionAPI) {
 				if (!isSandboxEnabled()) return localFind.execute(id, params, signal, onUpdate);
 				const activeSandbox = await ensureSandbox(ctx);
 				const tool = createFindTool(SANDBOX_WORKSPACE, {
-					operations: createSandboxFindOps(activeSandbox),
+					operations: createSandboxFindOps(activeSandbox, toolDetector!),
 				});
 				return tool.execute(id, params, signal, onUpdate);
 			},
@@ -294,7 +312,7 @@ export default function (pi: ExtensionAPI) {
 			async execute(_id, params, signal, _onUpdate, ctx) {
 				if (!isSandboxEnabled()) return localGrep.execute(_id, params, signal, _onUpdate);
 				const activeSandbox = await ensureSandbox(ctx);
-				return executeSandboxGrep(activeSandbox, params, signal);
+				return executeSandboxGrep(activeSandbox, params, signal, toolDetector ?? undefined);
 			},
 		});
 	}

@@ -87,6 +87,7 @@ Create `.pi/vercel-sandbox.json` in your project (or `~/.pi/agent/extensions/ver
 | `timeout` | `number` | `300000` (5 min) | Session timeout in milliseconds |
 | `networkPolicy` | `string \| object` | `"allow-all"` | Egress firewall policy (see Vercel docs) |
 | `keepAlive` | `boolean` | `false` | Extend timeout while background processes are detected |
+| `installNativeTools` | `boolean` | `true` | Install ripgrep on first sandbox creation |
 | `createCommands` | `string[]` | `[]` | Commands to run on first sandbox creation |
 | `resumeCommands` | `string[]` | `[]` | Commands to run on every sandbox resume |
 
@@ -191,21 +192,22 @@ This URL routes to the port exposed in the sandbox — useful for reviewing dev 
 │                                                 │
 │  /vercel/sandbox/  ← project workspace          │
 │  Node.js, git, python3, sudo                    │
+│  rg (ripgrep) ← installed on first creation     │
 │  Auto-snapshots on stop → resume by name         │
 └─────────────────────────────────────────────────┘
 ```
 
 The extension follows the same [tool routing pattern](https://pi.dev/docs/containerization) as Gondolin and the SSH extension:
 
-1. **`session_start`** — The extension calls `Sandbox.getOrCreate()` with the configured name. On first run, `onCreate` fires to run setup commands (git clone, npm install). On subsequent runs, `onResume` fires to restart services.
+1. **`session_start`** — The extension calls `Sandbox.getOrCreate()` with the configured name. On first run, `onCreate` fires to install native tools (if `installNativeTools` is enabled), then run setup commands (git clone, npm install). On subsequent runs, `onResume` fires to restart services.
 
 2. **Tool routing** — The extension re-registers Pi's built-in tools (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`) with operations that delegate to the sandbox:
    - `bash` → `sandbox.runCommand()`
    - `read` → `sandbox.fs.readFile()` / `sandbox.readFileToBuffer()`
    - `write` → `sandbox.fs.writeFile()` / `sandbox.writeFiles()`
    - `edit` → `sandbox.fs.readFile()` + `sandbox.fs.writeFile()`
-   - `grep` → file walking + JS line matching via `sandbox.fs.readdir/readFileToBuffer` (no `rg` in sandbox)
-   - `find` → `sandbox.fs.readdir()` recursive walking with glob matching
+   - `grep` → native `rg` (ripgrep) when installed, falls back to JS line matching via `sandbox.fs.readdir/readFileToBuffer`
+   - `find` → native `find -name` when available, falls back to JS recursive walking via `sandbox.fs.readdir`
    - `ls` → `sandbox.fs.readdir()` + `sandbox.fs.stat()`
 
 3. **Path mapping** — Pi sees paths relative to `/vercel/sandbox` (the sandbox default working directory). The extension updates the system prompt to inform the LLM of the remote working directory, just like the SSH extension does.
@@ -213,6 +215,23 @@ The extension follows the same [tool routing pattern](https://pi.dev/docs/contai
 4. **User bash** — The `user_bash` hook routes `!` and `!!` shell commands into the sandbox.
 
 5. **`session_shutdown`** — The extension calls `sandbox.stop()` to snapshot the filesystem and stop compute billing.
+
+### Native tools
+
+The sandbox runs Amazon Linux 2023 with sudo access. By default, the extension installs [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on first sandbox creation via `sudo dnf install -y ripgrep`. Since the sandbox filesystem persists across snapshots, you only pay the install cost once.
+
+Once installed:
+- **`grep`** operations use `rg` instead of JS-based file walking, which is significantly faster on large codebases (especially for broad searches across many files).
+- **`find`** operations use native `find -name` for simple glob patterns instead of JS-based recursive directory walking. Complex patterns with `**` fall back to JS-based matching.
+
+Tool availability is detected lazily and cached for the session. If installation fails (e.g., network restrictions), the extension falls back gracefully to JS-based operations with a warning notification.
+
+Disable native tool installation with:
+```json
+{
+  "installNativeTools": false
+}
+```
 
 ### Session graph navigation
 
@@ -235,7 +254,7 @@ With `keepAlive` enabled, the extension calls `sandbox.extendTimeout(5min)` befo
 
 - **No host filesystem mount** — Files exist only in the sandbox. Use `sandbox.writeFiles()` / `sandbox.readFileToBuffer()` for explicit sync if you need files on your host machine. A future `/vercel-sandbox sync` command could automate this.
 - **Process state doesn't survive stop** — Only filesystem persists. Running dev servers are killed when the sandbox stops. Configure `resume.commands` in `.pi/vercel-sandbox.json` to restart them automatically.
-- **Network latency** — Every file read, write, and command execution goes over HTTPS to the cloud sandbox. Operations that make many small reads (e.g., large `grep` across many files) may be slower than local execution.
+- **Network latency** — Every file read, write, and command execution goes over HTTPS to the cloud sandbox. Native `rg` and `find` mitigate this for grep/find by doing the work inside the sandbox and returning only results, but JS-based fallback operations (many small file reads) can be slow on large codebases.
 - **Resume latency** — The first command after sandbox resume takes ~2 seconds while the VM boots from the snapshot.
 - **Cost** — Vercel bills compute per vCPU-minute and snapshot storage per GB-month. See [Vercel Sandbox pricing](https://vercel.com/docs/vercel-sandbox/pricing).
 

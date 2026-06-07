@@ -40,6 +40,16 @@ describe("loadConfig", () => {
 		const config = loadConfig("/home/user/myproject", { name: "my-explicit-name" });
 		expect(config.name).toBe("my-explicit-name");
 	});
+
+	it("enables native tool installation by default", () => {
+		const config = loadConfig("/home/user/myproject");
+		expect(config.installNativeTools).toBe(true);
+	});
+
+	it("allows disabling native tool installation", () => {
+		const config = loadConfig("/home/user/myproject", { installNativeTools: false });
+		expect(config.installNativeTools).toBe(false);
+	});
 });
 
 describe("normalizeConfig", () => {
