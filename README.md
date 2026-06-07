@@ -38,7 +38,7 @@ This means:
 
 1. Install the extension:
    ```bash
-   pi install npm:pi-vercel-sandbox
+   pi install git:github.com/elecnix/pi-vercel-sandbox
    ```
 
 2. Link a Vercel project and pull an OIDC token (one-time per project):
