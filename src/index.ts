@@ -119,23 +119,21 @@ export default function (pi: ExtensionAPI) {
 		let sandboxInstance: Sandbox;
 		try {
 			sandboxInstance = await SandboxClass.getOrCreate({
-			name: cfg.name,
-			runtime: cfg.runtime,
-			timeout: cfg.timeout,
-			...(cfg.ports && cfg.ports.length > 0 ? { ports: cfg.ports } : {}),
-			onCreate: async (sbx) => {
-				ctx?.ui.setStatus("vercel-sandbox", ctx.ui.theme.fg("accent", `Vercel Sandbox: ${cfg.name} (creating)`));
-				for (const cmd of cfg.createCommands) {
-					await sbx.runCommand({ cmd: "bash", args: ["-lc", cmd] });
-				}
-			},
-			onResume: async (sbx) => {
-				ctx?.ui.setStatus("vercel-sandbox", ctx.ui.theme.fg("accent", `Vercel Sandbox: ${cfg.name} (resuming)`));
-				for (const cmd of cfg.resumeCommands) {
-					await sbx.runCommand({ cmd: "bash", args: ["-lc", cmd], detached: true });
-				}
-			},
-		});
+				name: cfg.name,
+				runtime: cfg.runtime,
+				timeout: cfg.timeout,
+				...(cfg.ports && cfg.ports.length > 0 ? { ports: cfg.ports } : {}),
+				onCreate: async (sbx) => {
+					ctx?.ui.setStatus("vercel-sandbox", ctx.ui.theme.fg("accent", `Vercel Sandbox: ${cfg.name} (creating)`));
+					for (const cmd of cfg.createCommands) {
+						await sbx.runCommand({ cmd: "bash", args: ["-lc", cmd] });
+					}
+				},
+			// NOTE: Do NOT use onResume here. It fires on every auto-resume
+			// (including those triggered internally by runCommand), causing
+			// repeated execution of resume commands and potential hangs.
+			// Resume commands are run once below after getOrCreate resolves.
+			});
 
 		} catch (error) {
 			sandbox = undefined;
@@ -146,6 +144,18 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		sandbox = sandboxInstance;
+
+		// Run resume commands once after sandbox is ready.
+		if (cfg.resumeCommands.length > 0) {
+			ctx?.ui.setStatus("vercel-sandbox", ctx.ui.theme.fg("accent", `Vercel Sandbox: ${cfg.name} (resuming)`));
+			for (const cmd of cfg.resumeCommands) {
+				try {
+					await sandboxInstance.runCommand({ cmd: "bash", args: ["-lc", cmd], detached: true });
+				} catch {
+					// Resume commands are best-effort
+				}
+			}
+		}
 
 		// Build status bar
 		let portInfo = "";
