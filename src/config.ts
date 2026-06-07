@@ -8,6 +8,10 @@
  *   4. Built-in defaults
  *
  * Later sources override earlier ones.
+ *
+ * Accepts both flat and nested config formats:
+ *   Flat:    { "createCommands": ["npm install"] }
+ *   Nested:  { "create": { "commands": ["npm install"] } }
  */
 
 import fs from "node:fs";
@@ -44,13 +48,47 @@ const DEFAULT_CONFIG: SandboxConfig = {
 	resumeCommands: [],
 };
 
-function readJsonFile(filePath: string): Partial<SandboxConfig> | null {
+function readJsonFile(filePath: string): Record<string, unknown> | null {
 	try {
 		const raw = fs.readFileSync(filePath, "utf8");
-		return JSON.parse(raw) as Partial<SandboxConfig>;
+		return JSON.parse(raw) as Record<string, unknown>;
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * Normalize config from various accepted JSON shapes.
+ * Supports both flat (`createCommands`) and nested (`create: { commands }`) formats.
+ */
+export function normalizeConfig(raw: Record<string, unknown>): Partial<SandboxConfig> {
+	const result: Record<string, unknown> = { ...raw };
+
+	// Handle nested `create: { commands: [...] }` → `createCommands: [...]`
+	if (!result.createCommands && typeof result.create === "object" && result.create !== null) {
+		const create = result.create as Record<string, unknown>;
+		if (Array.isArray(create.commands)) {
+			result.createCommands = create.commands;
+		}
+	}
+
+	// Handle nested `resume: { commands: [...] }` → `resumeCommands: [...]`
+	if (!result.resumeCommands && typeof result.resume === "object" && result.resume !== null) {
+		const resume = result.resume as Record<string, unknown>;
+		if (Array.isArray(resume.commands)) {
+			result.resumeCommands = resume.commands;
+		}
+	}
+
+	// Handle `resources: { vcpus: N }` → `vcpus: N`
+	if (result.vcpus === undefined && typeof result.resources === "object" && result.resources !== null) {
+		const resources = result.resources as Record<string, unknown>;
+		if (typeof resources.vcpus === "number") {
+			result.vcpus = resources.vcpus;
+		}
+	}
+
+	return result as Partial<SandboxConfig>;
 }
 
 function deriveSandboxName(localCwd: string): string {
@@ -62,8 +100,8 @@ export function loadConfig(localCwd: string, flagOverrides?: Partial<SandboxConf
 	const globalPath = path.join(os.homedir(), ".pi", "agent", "extensions", "vercel-sandbox.json");
 	const projectPath = path.join(localCwd, ".pi", "vercel-sandbox.json");
 
-	const globalConfig = readJsonFile(globalPath);
-	const projectConfig = readJsonFile(projectPath);
+	const globalConfig = normalizeConfig(readJsonFile(globalPath) ?? {});
+	const projectConfig = normalizeConfig(readJsonFile(projectPath) ?? {});
 
 	// Merge: defaults → global → project → flags
 	const merged: SandboxConfig = {

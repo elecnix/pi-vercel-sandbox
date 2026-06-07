@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { loadConfig } from "./config.js";
+import { loadConfig, normalizeConfig } from "./config.js";
 import { toSandboxPath, SANDBOX_WORKSPACE, stripAtPrefix, toPosix } from "./paths.js";
 
 // ─── Config Tests ────────────────────────────────────────────────────
@@ -39,6 +39,74 @@ describe("loadConfig", () => {
 	it("uses explicit name over derived name", () => {
 		const config = loadConfig("/home/user/myproject", { name: "my-explicit-name" });
 		expect(config.name).toBe("my-explicit-name");
+	});
+});
+
+describe("normalizeConfig", () => {
+	it("handles flat format: createCommands / resumeCommands", () => {
+		const result = normalizeConfig({
+			name: "test",
+			createCommands: ["npm install"],
+			resumeCommands: ["npm run dev"],
+		});
+		expect(result.createCommands).toEqual(["npm install"]);
+		expect(result.resumeCommands).toEqual(["npm run dev"]);
+	});
+
+	it("handles nested format: create.commands / resume.commands", () => {
+		const result = normalizeConfig({
+			name: "test",
+			create: { commands: ["git clone .", "npm install"] },
+			resume: { commands: ["npm run dev"] },
+		});
+		expect(result.createCommands).toEqual(["git clone .", "npm install"]);
+		expect(result.resumeCommands).toEqual(["npm run dev"]);
+	});
+
+	it("flat format takes precedence over nested", () => {
+		const result = normalizeConfig({
+			name: "test",
+			createCommands: ["flat"],
+			create: { commands: ["nested"] },
+		});
+		expect(result.createCommands).toEqual(["flat"]);
+	});
+
+	it("handles resources.vcpus → vcpus normalization", () => {
+		const result = normalizeConfig({
+			name: "test",
+			resources: { vcpus: 4 },
+		});
+		expect(result.vcpus).toBe(4);
+	});
+
+	it("top-level vcpus takes precedence over resources.vcpus", () => {
+		const result = normalizeConfig({
+			name: "test",
+			vcpus: 2,
+			resources: { vcpus: 4 },
+		});
+		expect(result.vcpus).toBe(2);
+	});
+
+	it("handles empty nested objects gracefully", () => {
+		const result = normalizeConfig({
+			name: "test",
+			create: {},
+			resume: {},
+			resources: {},
+		});
+		expect(result.createCommands).toBeUndefined();
+		expect(result.resumeCommands).toBeUndefined();
+		expect(result.vcpus).toBeUndefined();
+	});
+
+	it("passes through unknown keys unchanged", () => {
+		const result = normalizeConfig({
+			name: "test",
+			customField: "value",
+		});
+		expect((result as Record<string, unknown>).customField).toBe("value");
 	});
 });
 
@@ -112,5 +180,15 @@ describe("toSandboxPath", () => {
 
 	it("handles whitespace in input", () => {
 		expect(toSandboxPath("  src/index.ts  ")).toBe(`${SANDBOX_WORKSPACE}/src/index.ts`);
+	});
+
+	it("maps nested relative paths correctly", () => {
+		expect(toSandboxPath("a/b/c.txt")).toBe(`${SANDBOX_WORKSPACE}/a/b/c.txt`);
+	});
+
+	it("handles paths with dots in directory names", () => {
+		expect(toSandboxPath("node_modules/.package-lock.json")).toBe(
+			`${SANDBOX_WORKSPACE}/node_modules/.package-lock.json`,
+		);
 	});
 });

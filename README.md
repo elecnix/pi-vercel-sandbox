@@ -63,22 +63,18 @@ Create `.pi/vercel-sandbox.json` in your project (or `~/.pi/agent/extensions/ver
 {
   "name": "pi-my-project",
   "runtime": "node24",
-  "resources": { "vcpus": 2 },
+  "vcpus": 2,
   "ports": [3000, 8080],
   "timeout": 300000,
   "networkPolicy": "allow-all",
   "keepAlive": false,
-  "create": {
-    "commands": [
-      "git clone https://github.com/org/repo .",
-      "npm install"
-    ]
-  },
-  "resume": {
-    "commands": [
-      "npm run dev"
-    ]
-  }
+  "createCommands": [
+    "git clone https://github.com/org/repo .",
+    "npm install"
+  ],
+  "resumeCommands": [
+    "npm run dev"
+  ]
 }
 ```
 
@@ -86,13 +82,13 @@ Create `.pi/vercel-sandbox.json` in your project (or `~/.pi/agent/extensions/ver
 |---|---|---|---|
 | `name` | `string` | `"pi-<project-dir-name>"` | Sandbox name (used for `Sandbox.get()` resume) |
 | `runtime` | `string` | `"node24"` | Runtime image (`node26`, `node24`, `node22`, `python3.13`) |
-| `resources.vcpus` | `number` | `2` | Number of vCPUs (2 GB RAM per vCPU) |
+| `vcpus` | `number` | `2` | Number of vCPUs (2 GB RAM per vCPU) |
 | `ports` | `number[]` | `[]` | Ports to expose (required for `sandbox.domain()`) |
 | `timeout` | `number` | `300000` (5 min) | Session timeout in milliseconds |
 | `networkPolicy` | `string \| object` | `"allow-all"` | Egress firewall policy (see Vercel docs) |
 | `keepAlive` | `boolean` | `false` | Extend timeout while background processes are detected |
-| `create.commands` | `string[]` | `[]` | Commands to run on first sandbox creation |
-| `resume.commands` | `string[]` | `[]` | Commands to run on every sandbox resume |
+| `createCommands` | `string[]` | `[]` | Commands to run on first sandbox creation |
+| `resumeCommands` | `string[]` | `[]` | Commands to run on every sandbox resume |
 
 ## Usage
 
@@ -149,7 +145,7 @@ With keep-alive, the extension extends the sandbox timeout before each tool exec
 If your config includes `ports`, the extension displays the public URL in the Pi status bar:
 
 ```
-🚀 Sandbox: pi-my-project | Preview: https://sb-abc123.vercel.run
+☁ pi-my-project | https://sb-abc123.vercel.run
 ```
 
 This URL routes to the port exposed in the sandbox — useful for reviewing dev server output in a browser.
@@ -208,8 +204,8 @@ The extension follows the same [tool routing pattern](https://pi.dev/docs/contai
    - `read` → `sandbox.fs.readFile()` / `sandbox.readFileToBuffer()`
    - `write` → `sandbox.fs.writeFile()` / `sandbox.writeFiles()`
    - `edit` → `sandbox.fs.readFile()` + `sandbox.fs.writeFile()`
-   - `grep` → `sandbox.runCommand("rg", [...])`
-   - `find` → `sandbox.runCommand("find", [...])` or `sandbox.fs.readdir()` walking
+   - `grep` → file walking + JS line matching via `sandbox.fs.readdir/readFileToBuffer` (no `rg` in sandbox)
+   - `find` → `sandbox.fs.readdir()` recursive walking with glob matching
    - `ls` → `sandbox.fs.readdir()` + `sandbox.fs.stat()`
 
 3. **Path mapping** — Pi sees paths relative to `/vercel/sandbox` (the sandbox default working directory). The extension updates the system prompt to inform the LLM of the remote working directory, just like the SSH extension does.
@@ -233,7 +229,7 @@ The extension balances responsiveness and billing:
 3. **On resume**: The next Pi tool call triggers `Sandbox.get({ name })`, which resumes from the snapshot in ~2 seconds.
 4. **On explicit quit**: `session_shutdown` calls `sandbox.stop()` immediately rather than waiting for the idle timeout.
 
-With `keepAlive` enabled, the extension calls `sandbox.extendTimeout()` before each tool execution, preventing the sandbox from auto-stopping while Pi is actively working on long-running tasks.
+With `keepAlive` enabled, the extension calls `sandbox.extendTimeout(5min)` before each bash tool execution, preventing the sandbox from auto-stopping while Pi is actively working on long-running tasks.
 
 ## Limitations
 
