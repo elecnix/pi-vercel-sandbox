@@ -317,13 +317,25 @@ export async function executeSandboxGrep(
 
 // ─── Bash ────────────────────────────────────────────────────────────
 
+/**
+ * Sanitize and filter environment variables before passing to the sandbox.
+ * We strip PATH, HOME, and other host-specific vars to avoid overriding
+ * the sandbox's own environment.
+ */
 function sanitizeEnv(env: NodeJS.ProcessEnv | undefined): Record<string, string> | undefined {
 	if (!env) return undefined;
+	const blocked = new Set([
+		"PATH", "HOME", "USER", "SHELL", "PWD", "OLDPWD",
+		"HOSTNAME", "LANG", "LC_ALL", "TERM",
+		"NVM_DIR", "NVM_HOME", "NVM_BIN",
+	]);
 	const result: Record<string, string> = {};
 	for (const [key, value] of Object.entries(env)) {
-		if (typeof value === "string") result[key] = value;
+		if (typeof value === "string" && !blocked.has(key)) {
+			result[key] = value;
+		}
 	}
-	return result;
+	return Object.keys(result).length > 0 ? result : undefined;
 }
 
 export function createSandboxBashOps(sandbox: Sandbox): BashOperations {
