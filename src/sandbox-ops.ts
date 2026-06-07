@@ -463,7 +463,7 @@ export function createSandboxBashOps(sandbox: Sandbox): BashOperations {
 		exec: async (command, cwd, { onData, signal, timeout, env }) => {
 			if (signal?.aborted) throw new Error("aborted");
 
-			const sandboxCwd = toSandboxPath(cwd);
+			const sandboxCwd = SANDBOX_WORKSPACE;
 			const controller = new AbortController();
 			const onAbort = () => controller.abort();
 			signal?.addEventListener("abort", onAbort, { once: true });
@@ -478,13 +478,23 @@ export function createSandboxBashOps(sandbox: Sandbox): BashOperations {
 					: undefined;
 
 			try {
+				const cleanEnv = sanitizeEnv(env);
+
+				// Vercel SDK rejects env with empty keys or non-string values;
+				// double-check after sanitizeEnv and omit if empty.
+				if (cleanEnv) {
+					for (const k of Object.keys(cleanEnv)) {
+						if (!k || typeof cleanEnv[k] !== "string") delete cleanEnv[k];
+					}
+				}
+
 				// Run as detached to get a Command back immediately,
 				// then stream its logs and wait for completion.
 				const cmd = await sandbox.runCommand({
 					cmd: "bash",
 					args: ["-lc", command],
 					cwd: sandboxCwd,
-					env: sanitizeEnv(env) as Record<string, string> | undefined,
+					...(cleanEnv && Object.keys(cleanEnv).length > 0 ? { env: cleanEnv } : {}),
 					detached: true,
 				});
 
