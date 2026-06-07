@@ -106,14 +106,27 @@ export default function (pi: ExtensionAPI) {
 
 	/**
 	 * Create or resume a sandbox using the Vercel SDK.
+	 * On failure, clears sandbox state and notifies the user.
 	 */
 	async function startSandbox(ctx?: ExtensionContext): Promise<Sandbox> {
 		const cfg = config!;
 		ctx?.ui.setStatus("vercel-sandbox", ctx.ui.theme.fg("accent", `Vercel Sandbox: starting ${cfg.name}`));
 
-		const { Sandbox: SandboxClass } = await import("@vercel/sandbox");
+		let SandboxClass: typeof Sandbox;
+		try {
+			const mod = await import("@vercel/sandbox");
+			SandboxClass = mod.Sandbox;
+		} catch (error) {
+			sandbox = undefined;
+			const msg = error instanceof Error ? error.message : String(error);
+			ctx?.ui.setStatus("vercel-sandbox", ctx.ui.theme.fg("error", "Vercel Sandbox: load failed"));
+			ctx?.ui.notify(`Vercel Sandbox: failed to load SDK: ${msg}`, "error");
+			throw new Error(`Failed to load @vercel/sandbox: ${msg}`);
+		}
 
-		const sandboxInstance = await SandboxClass.getOrCreate({
+		let sandboxInstance: Sandbox;
+		try {
+			sandboxInstance = await SandboxClass.getOrCreate({
 			name: cfg.name,
 			runtime: cfg.runtime,
 			timeout: cfg.timeout,
@@ -131,6 +144,14 @@ export default function (pi: ExtensionAPI) {
 				}
 			},
 		});
+
+		} catch (error) {
+			sandbox = undefined;
+			const msg = error instanceof Error ? error.message : String(error);
+			ctx?.ui.setStatus("vercel-sandbox", ctx.ui.theme.fg("error", "Vercel Sandbox: connect failed"));
+			ctx?.ui.notify(`Vercel Sandbox: failed to start: ${msg}`, "error");
+			throw error;
+		}
 
 		sandbox = sandboxInstance;
 

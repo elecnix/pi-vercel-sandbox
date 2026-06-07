@@ -1,0 +1,35 @@
+// Example .pi/vercel-sandbox.json configuration
+// Place this in your project root at .pi/vercel-sandbox.json
+// or globally at ~/.pi/agent/extensions/vercel-sandbox.json
+{
+  // Sandbox name — used for Sandbox.get() resume.
+  // Default: "pi-<project-dir-name>"
+  "name": "pi-my-project",
+
+  // Runtime image. Options: node26, node24, node22, python3.13
+  "runtime": "node24",
+
+  // Number of vCPUs (2 GB RAM per vCPU). Default: 2
+  "vcpus": 2,
+
+  // Ports to expose for public preview URLs
+  "ports": [3000],
+
+  // Session timeout in milliseconds. Default: 300000 (5 min)
+  "timeout": 300000,
+
+  // Keep sandbox alive between Pi turns.
+  // Useful when running dev servers or long-running processes.
+  "keepAlive": false,
+
+  // Commands to run on first sandbox creation (fresh sandbox)
+  "createCommands": [
+    "git clone https://github.com/your-org/your-repo .",
+    "npm install"
+  ],
+
+  // Commands to run on every sandbox resume (after stop/snapshot)
+  "resumeCommands": [
+    "npm run dev"
+  ]
+}
