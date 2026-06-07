@@ -37,6 +37,8 @@ export interface SandboxConfig {
 	createCommands: string[];
 	/** Commands to run on every sandbox resume */
 	resumeCommands: string[];
+	/** Whether to install native tools (ripgrep, findutils) on sandbox creation */
+	installNativeTools: boolean;
 }
 
 const DEFAULT_CONFIG: SandboxConfig = {
@@ -46,6 +48,7 @@ const DEFAULT_CONFIG: SandboxConfig = {
 	keepAlive: false,
 	createCommands: [],
 	resumeCommands: [],
+	installNativeTools: true,
 };
 
 function readJsonFile(filePath: string): Record<string, unknown> | null {

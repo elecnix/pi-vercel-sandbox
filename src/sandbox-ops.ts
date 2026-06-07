@@ -3,6 +3,11 @@
  *
  * Implements the Operations interfaces that Pi's createXTool() factory
  * functions accept, delegating each operation to the Vercel Sandbox SDK.
+ *
+ * When native tools (ripgrep, find) are available in the sandbox,
+ * grep and find operations use them for significantly better performance
+ * on large codebases. Native tools are installed on first sandbox creation
+ * (configurable via installNativeTools in .pi/vercel-sandbox.json).
  */
 
 import type { Sandbox } from "@vercel/sandbox";
@@ -22,7 +27,8 @@ import {
 	truncateHead,
 	truncateLine,
 } from "@earendil-works/pi-coding-agent";
-import { toSandboxPath, SANDBOX_WORKSPACE } from "./paths.js";
+import { SANDBOX_WORKSPACE, toSandboxPath } from "./paths.js";
+import { NativeToolDetector, buildRgCommand, buildFindCommand } from "./native-tools.js";
 import path from "node:path";
 
 // ─── Read ───────────────────────────────────────────────────────────
@@ -166,7 +172,13 @@ async function walkSandboxFiles(
 	return walkDir(root, "");
 }
 
-export function createSandboxFindOps(sandbox: Sandbox): FindOperations {
+// ─── Find Operations Factory ─────────────────────────────────────────
+
+/**
+ * Create find operations that use native `find` when available,
+ * falling back to JS-based file walking.
+ */
+export function createSandboxFindOps(sandbox: Sandbox, detector: NativeToolDetector): FindOperations {
 	return {
 		exists: async (filePath: string) => {
 			try {
@@ -177,6 +189,27 @@ export function createSandboxFindOps(sandbox: Sandbox): FindOperations {
 			}
 		},
 		glob: async (pattern: string, cwd: string, options: { limit: number }) => {
+			// Try native find first
+			if (await detector.hasFind()) {
+				const cmd = buildFindCommand(pattern, cwd, options, SANDBOX_WORKSPACE);
+				if (cmd) {
+					try {
+						const result = await sandbox.runCommand({
+							cmd: cmd.cmd,
+							args: cmd.args,
+						});
+						const output = await result.stdout();
+						if (result.exitCode === 0 && output.trim()) {
+							const allResults = output.trim().split("\n");
+							return allResults.slice(0, options.limit);
+						}
+					} catch {
+						// Fall through to JS-based walking
+					}
+				}
+			}
+
+			// Fallback: JS-based file walking
 			const root = toSandboxPath(cwd);
 			const results: string[] = [];
 			await walkSandboxFiles(sandbox, root, async (sandboxPath, relativePath) => {
@@ -231,7 +264,94 @@ type TextToolResult<TDetails> = {
 	details: TDetails | undefined;
 };
 
+/**
+ * Execute grep using native ripgrep when available, falling back to JS.
+ */
 export async function executeSandboxGrep(
+	sandbox: Sandbox,
+	params: GrepToolInput,
+	signal?: AbortSignal,
+	detector?: NativeToolDetector,
+): Promise<TextToolResult<GrepToolDetails>> {
+	// Try native ripgrep first
+	if (detector && await detector.hasRg()) {
+		const rgCmd = buildRgCommand(
+			{
+				pattern: params.pattern,
+				path: params.path,
+				literal: params.literal,
+				ignoreCase: params.ignoreCase,
+				context: params.context,
+				glob: params.glob,
+				limit: params.limit,
+			},
+			SANDBOX_WORKSPACE,
+		);
+		if (rgCmd) {
+			try {
+				const result = await sandbox.runCommand({
+					cmd: rgCmd.cmd,
+					args: rgCmd.args,
+			});
+	
+
+				// rg exits with 1 when no matches found, 2+ for errors
+				if (result.exitCode > 1) {
+					// Real error from rg — fall back to JS
+				} else if (result.exitCode === 0) {
+					// Matches found — format and return
+					const output = (await result.stdout()).trim();
+					if (output) {
+						return formatRgOutput(output);
+					}
+				} else if (result.exitCode === 1) {
+					// No matches found
+					return { content: [{ type: "text", text: "No matches found" }], details: undefined };
+				}
+			} catch {
+				// Fall through to JS-based grep
+			}
+		}
+	}
+
+	// Fallback: JS-based file walking grep
+	return executeSandboxGrepJs(sandbox, params, signal);
+}
+
+/**
+ * Format ripgrep output for Pi display.
+ * rg output is already in file:line:content format with context lines
+ * using - separator, which is the same format Pi expects.
+ */
+function formatRgOutput(
+	rawOutput: string,
+): TextToolResult<GrepToolDetails> {
+	const details: GrepToolDetails = {};
+
+	// rg output is already properly formatted with file:line:content
+	// and file-line-content for context lines.
+	// Just apply truncation like the JS path does.
+	const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+	const notices: string[] = [];
+	let output = truncation.content;
+
+	if (truncation.truncated) {
+		details.truncation = truncation;
+		notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+	}
+	if (notices.length > 0) output += `\n\n[${notices.join(". ")}]`;
+
+	return {
+		content: [{ type: "text", text: output }],
+		details: Object.keys(details).length > 0 ? details : undefined,
+	};
+}
+
+/**
+ * JS-based fallback grep — walks sandbox filesystem and matches lines in JS.
+ * This is the original implementation, used when rg is not available.
+ */
+async function executeSandboxGrepJs(
 	sandbox: Sandbox,
 	params: GrepToolInput,
 	signal?: AbortSignal,

@@ -22,7 +22,14 @@
   // Useful when running dev servers or long-running processes.
   "keepAlive": false,
 
+  // Install native tools (ripgrep) on first sandbox creation.
+  // These persist across sandbox snapshots so you only pay the install
+  // cost once. Native tools make grep and find operations significantly
+  // faster on large codebases. Default: true
+  "installNativeTools": true,
+
   // Commands to run on first sandbox creation (fresh sandbox)
+  // These run AFTER native tool installation, so rg is available.
   "createCommands": [
     "git clone https://github.com/your-org/your-repo .",
     "npm install"
