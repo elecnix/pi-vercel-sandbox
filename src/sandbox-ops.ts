@@ -340,7 +340,7 @@ function sanitizeEnv(env: NodeJS.ProcessEnv | undefined): Record<string, string>
 
 export function createSandboxBashOps(sandbox: Sandbox): BashOperations {
 	return {
-		exec: async (command, cwd, { onData, signal, timeout, env }) => {
+		exec: async (command, _cwd, { onData, signal, timeout, env }) => {
 			if (signal?.aborted) throw new Error("aborted");
 
 			const sandboxCwd = SANDBOX_WORKSPACE;
