@@ -70,19 +70,120 @@ export default function (pi: ExtensionAPI) {
 	let config: SandboxConfig | undefined;
 
 	// ─── Tool Overrides ────────────────────────────────────────────────
-	// Registered at extension load time (not in session_start) so they
-	// replace built-in tools before the first agent turn. The execute()
-	// method checks isSandboxEnabled() to decide routing. When the flag
-	// is off, tools fall through to local execution, avoiding conflicts
-	// with other tool-routing extensions (e.g., SSH, Gondolin).
+	// Registered lazily in session_start to avoid conflicts with other tool-routing
+	// extensions (e.g., SSH, Gondolin) when --vercel-sandbox is not explicitly enabled.
+	// This allows multiple tool-routing extensions to coexist.
 
-	const localRead = createReadTool(localCwd);
-	const localWrite = createWriteTool(localCwd);
-	const localEdit = createEditTool(localCwd);
-	const localBash = createBashTool(localCwd);
-	const localGrep = createGrepTool(localCwd);
-	const localFind = createFindTool(localCwd);
-	const localLs = createLsTool(localCwd);
+	// These are defined here but tools are registered conditionally in session_start
+	let toolOverridesRegistered = false;
+
+	/**
+	 * Register tool overrides - called only when sandbox mode is active.
+	 * This prevents conflicts with other extensions like pi-gondolin.
+	 */
+	function registerToolOverrides(pi: ExtensionAPI) {
+		if (toolOverridesRegistered) return;
+		toolOverridesRegistered = true;
+
+		const localRead = createReadTool(localCwd);
+		const localWrite = createWriteTool(localCwd);
+		const localEdit = createEditTool(localCwd);
+		const localBash = createBashTool(localCwd);
+		const localGrep = createGrepTool(localCwd);
+		const localFind = createFindTool(localCwd);
+		const localLs = createLsTool(localCwd);
+
+		pi.registerTool({
+			...localRead,
+			async execute(id, params, signal, onUpdate, ctx) {
+				if (!isSandboxEnabled()) return localRead.execute(id, params, signal, onUpdate);
+				const activeSandbox = await ensureSandbox(ctx);
+				const tool = createReadTool(SANDBOX_WORKSPACE, {
+					operations: createSandboxReadOps(activeSandbox),
+				});
+				return tool.execute(id, params, signal, onUpdate);
+			},
+		});
+
+		pi.registerTool({
+			...localWrite,
+			async execute(id, params, signal, onUpdate, ctx) {
+				if (!isSandboxEnabled()) return localWrite.execute(id, params, signal, onUpdate);
+				const activeSandbox = await ensureSandbox(ctx);
+				const tool = createWriteTool(SANDBOX_WORKSPACE, {
+					operations: createSandboxWriteOps(activeSandbox),
+				});
+				return tool.execute(id, params, signal, onUpdate);
+			},
+		});
+
+		pi.registerTool({
+			...localEdit,
+			async execute(id, params, signal, onUpdate, ctx) {
+				if (!isSandboxEnabled()) return localEdit.execute(id, params, signal, onUpdate);
+				const activeSandbox = await ensureSandbox(ctx);
+				const tool = createEditTool(SANDBOX_WORKSPACE, {
+					operations: createSandboxEditOps(activeSandbox),
+				});
+				return tool.execute(id, params, signal, onUpdate);
+			},
+		});
+
+		pi.registerTool({
+			...localBash,
+			async execute(id, params, signal, onUpdate, ctx) {
+				if (!isSandboxEnabled()) return localBash.execute(id, params, signal, onUpdate);
+				const activeSandbox = await ensureSandbox(ctx);
+
+				// Extend timeout if keep-alive mode is enabled
+				if (config?.keepAlive) {
+					try {
+						await activeSandbox.extendTimeout(5 * 60 * 1000);
+					} catch {
+						// Timeout extension is best-effort; ignore errors
+					}
+				}
+
+				const tool = createBashTool(SANDBOX_WORKSPACE, {
+					operations: createSandboxBashOps(activeSandbox),
+				});
+				return tool.execute(id, params, signal, onUpdate);
+			},
+		});
+
+		pi.registerTool({
+			...localLs,
+			async execute(id, params, signal, onUpdate, ctx) {
+				if (!isSandboxEnabled()) return localLs.execute(id, params, signal, onUpdate);
+				const activeSandbox = await ensureSandbox(ctx);
+				const tool = createLsTool(SANDBOX_WORKSPACE, {
+					operations: createSandboxLsOps(activeSandbox),
+				});
+				return tool.execute(id, params, signal, onUpdate);
+			},
+		});
+
+		pi.registerTool({
+			...localFind,
+			async execute(id, params, signal, onUpdate, ctx) {
+				if (!isSandboxEnabled()) return localFind.execute(id, params, signal, onUpdate);
+				const activeSandbox = await ensureSandbox(ctx);
+				const tool = createFindTool(SANDBOX_WORKSPACE, {
+					operations: createSandboxFindOps(activeSandbox),
+				});
+				return tool.execute(id, params, signal, onUpdate);
+			},
+		});
+
+		pi.registerTool({
+			...localGrep,
+			async execute(_id, params, signal, _onUpdate, ctx) {
+				if (!isSandboxEnabled()) return localGrep.execute(_id, params, signal, _onUpdate);
+				const activeSandbox = await ensureSandbox(ctx);
+				return executeSandboxGrep(activeSandbox, params, signal);
+			},
+		});
+	}
 
 	/**
 	 * Check if Vercel Sandbox mode is active.
@@ -212,97 +313,6 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	pi.registerTool({
-		...localRead,
-		async execute(id, params, signal, onUpdate, ctx) {
-			if (!isSandboxEnabled()) return localRead.execute(id, params, signal, onUpdate);
-			const activeSandbox = await ensureSandbox(ctx);
-			const tool = createReadTool(SANDBOX_WORKSPACE, {
-				operations: createSandboxReadOps(activeSandbox),
-			});
-			return tool.execute(id, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...localWrite,
-		async execute(id, params, signal, onUpdate, ctx) {
-			if (!isSandboxEnabled()) return localWrite.execute(id, params, signal, onUpdate);
-			const activeSandbox = await ensureSandbox(ctx);
-			const tool = createWriteTool(SANDBOX_WORKSPACE, {
-				operations: createSandboxWriteOps(activeSandbox),
-			});
-			return tool.execute(id, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...localEdit,
-		async execute(id, params, signal, onUpdate, ctx) {
-			if (!isSandboxEnabled()) return localEdit.execute(id, params, signal, onUpdate);
-			const activeSandbox = await ensureSandbox(ctx);
-			const tool = createEditTool(SANDBOX_WORKSPACE, {
-				operations: createSandboxEditOps(activeSandbox),
-			});
-			return tool.execute(id, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...localBash,
-		async execute(id, params, signal, onUpdate, ctx) {
-			if (!isSandboxEnabled()) return localBash.execute(id, params, signal, onUpdate);
-			const activeSandbox = await ensureSandbox(ctx);
-
-			// Extend timeout if keep-alive mode is enabled
-			if (config?.keepAlive) {
-				try {
-					await activeSandbox.extendTimeout(5 * 60 * 1000);
-				} catch {
-					// Timeout extension is best-effort; ignore errors
-				}
-			}
-
-			const tool = createBashTool(SANDBOX_WORKSPACE, {
-				operations: createSandboxBashOps(activeSandbox),
-			});
-			return tool.execute(id, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...localLs,
-		async execute(id, params, signal, onUpdate, ctx) {
-			if (!isSandboxEnabled()) return localLs.execute(id, params, signal, onUpdate);
-			const activeSandbox = await ensureSandbox(ctx);
-			const tool = createLsTool(SANDBOX_WORKSPACE, {
-				operations: createSandboxLsOps(activeSandbox),
-			});
-			return tool.execute(id, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...localFind,
-		async execute(id, params, signal, onUpdate, ctx) {
-			if (!isSandboxEnabled()) return localFind.execute(id, params, signal, onUpdate);
-			const activeSandbox = await ensureSandbox(ctx);
-			const tool = createFindTool(SANDBOX_WORKSPACE, {
-				operations: createSandboxFindOps(activeSandbox),
-			});
-			return tool.execute(id, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...localGrep,
-		async execute(_id, params, signal, _onUpdate, ctx) {
-			if (!isSandboxEnabled()) return localGrep.execute(_id, params, signal, _onUpdate);
-			const activeSandbox = await ensureSandbox(ctx);
-			return executeSandboxGrep(activeSandbox, params, signal);
-		},
-	});
-
 	// ─── Lifecycle Events ──────────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -314,10 +324,14 @@ export default function (pi: ExtensionAPI) {
 
 		config = loadConfig(localCwd, flagOverrides);
 
+		// Only register tool overrides when sandbox mode is actually enabled
 		if (!isSandboxEnabled()) {
 			ctx.ui.setStatus("vercel-sandbox", undefined);
 			return;
 		}
+
+		registerToolOverrides(pi);
+		ctx.ui.setStatus("vercel-sandbox", ctx.ui.theme.fg("muted", "Vercel Sandbox: registering tools"));
 
 		await ensureSandbox(ctx);
 	});
