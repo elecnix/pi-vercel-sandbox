@@ -17,7 +17,7 @@
     "@vercel/sandbox": "^2.1.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.78.1",
+    "@earendil-works/pi-coding-agent": "0.87.1",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   },
